@@ -1,0 +1,9 @@
+node_modules/
+*.tgz
+*.log
+*.bak
+.DS_Store
+Thumbs.db
+
+# internal planning doc, not part of the published plugin
+PLAN.md
