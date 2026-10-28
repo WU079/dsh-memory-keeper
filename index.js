@@ -226,13 +226,21 @@ export function apply(ctx, rawConfig) {
       const { dir } = resolveDataDir(ctx, cfg)
       const limit = Math.min(200, Math.max(1, Number(args.limit) || cfg.searchLimit))
       const r = searchAll(dir, { query: args.query, limit, scope: args.scope || 'all' })
+      // 一行都没搜到就别给「相关」：没命中的查询扩散出来的多半是噪声，反而误导
+      const related = r.hits.length ? assocFromGraph(dir, args.query) : []
+      const hint = r.hits.length
+        ? (related.length
+          ? '出处格式：文件:行号（相对数据目录）；related 是顺着记忆图谱的边扩散出来的相关条目，分数越高越相关'
+          : '出处格式：文件:行号（相对数据目录）')
+        : '没找到；换个词，或先 mem_wake 看看现在有什么'
       return {
         ok: true,
         query: args.query,
         dataDir: dir,
         count: r.hits.length,
         hits: r.hits,
-        hint: r.hits.length ? '出处格式：文件:行号（相对数据目录）' : '没找到；换个词，或先 mem_wake 看看现在有什么',
+        related,
+        hint,
       }
     },
   })
@@ -344,6 +352,76 @@ export function apply(ctx, rawConfig) {
     const r = searchAll(dir, { query: q, limit: cfg.searchLimit, scope: 'all' })
     if (!r.hits.length) return `没搜到「${q}」。`
     return [`搜到 ${r.hits.length} 行（${dir}）：`, ...r.hits.map((h) => `- ${h.file}:${h.line}　${h.text}`)].join('\n')
+  }
+
+  // —— 记忆图谱（memory-graph）：mem_search 搜完顺带给出「顺着边能找到」的一段。
+  //    图是 <dataDir>/memory-graph/graph.json（由 memory-graph/build.py 生成）；
+  //    没有这个文件就静默跳过，插件照常可用。
+  let graphCache = null
+  let graphCacheKey = ''
+  function loadGraph(dir) {
+    const p = path.join(dir, 'memory-graph', 'graph.json')
+    try {
+      const st = fs.statSync(p)
+      const key = `${p}:${st.mtimeMs}`
+      if (graphCache && graphCacheKey === key) return graphCache
+      graphCache = JSON.parse(fs.readFileSync(p, 'utf8'))
+      graphCacheKey = key
+      return graphCache
+    } catch {
+      return null
+    }
+  }
+
+  function assocFromGraph(dir, query, { min = 0.8, top = 6, hops = 2 } = {}) {
+    const g = loadGraph(dir)
+    if (!g?.nodes || !g?.adj) return []
+    const terms = String(query || '').replace(/\u3000/g, ' ').split(/\s+/).filter(Boolean)
+    if (!terms.length) return []
+    const seeds = []
+    for (const [id, n] of Object.entries(g.nodes)) {
+      const blob = `${n.title || ''}${n.text || ''}`
+      let hit = 0
+      for (const t of terms) if (blob.includes(t)) hit++
+      if (hit) seeds.push({ id, hit, len: (n.text || '').length })
+    }
+    seeds.sort((a, b) => b.hit - a.hit || a.len - b.len)
+    const picked = seeds.slice(0, 3)
+    if (!picked.length) return []
+    const score = new Map()
+    const visited = new Set()
+    for (const s of picked) { score.set(s.id, 1); visited.add(s.id) }
+    let frontier = picked.map((s) => s.id)
+    for (let hop = 1; hop <= hops; hop++) {
+      const cand = new Map()
+      for (const src of frontier) {
+        for (const e of (g.adj[src] || []).slice(0, 12)) {
+          if (visited.has(e.dst)) continue
+          const want = e.w * Math.pow(0.7, hop - 1)
+          if (!(cand.get(e.dst) >= want)) cand.set(e.dst, want)
+        }
+      }
+      if (!cand.size) break
+      for (const [k, v] of cand) { score.set(k, Math.max(score.get(k) || 0, v)); visited.add(k) }
+      frontier = [...cand.keys()]
+    }
+    const seedIds = new Set(picked.map((s) => s.id))
+    return [...score.entries()]
+      .filter(([id, s]) => !seedIds.has(id) && s >= min)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, top)
+      .map(([id, s]) => {
+        const n = g.nodes[id] || {}
+        return {
+          score: Math.round(s * 100) / 100,
+          id,
+          kind: n.kind,
+          title: n.title,
+          source: n.source,
+          section: n.section,
+          excerpt: clip(String(n.text || '').replace(/\s+/g, ' '), 80),
+        }
+      })
   }
 
   function handleMem(input) {
