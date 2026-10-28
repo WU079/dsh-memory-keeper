@@ -23,6 +23,7 @@ import {
 } from './lib/store.mjs'
 import { archiveOld, exportAll, gitBackup } from './lib/export.mjs'
 import { clip, ensureDir, localTime, nowIso, readText } from './lib/util.mjs'
+import { assocFromGraph as assocGraph, suggestLinks } from './lib/assoc.mjs'
 
 const hostDeps = await loadHostDeps()
 const z = hostDeps.z
@@ -286,6 +287,7 @@ export function apply(ctx, rawConfig) {
           bytesAfter: r.bytesAfter,
           sha256Before: r.sha256Before,
           sha256After: r.sha256After,
+          ...linkHint(dir, args.content),
         }
       }
       const mode = args.mode === 'replace-section' ? 'replace-section' : 'append'
@@ -304,6 +306,7 @@ export function apply(ctx, rawConfig) {
         bytesAfter: r.bytesAfter,
         sha256Before: r.sha256Before,
         sha256After: r.sha256After,
+        ...linkHint(dir, args.content),
       }
     },
   })
@@ -373,55 +376,29 @@ export function apply(ctx, rawConfig) {
     }
   }
 
-  function assocFromGraph(dir, query, { min = 0.8, top = 6, hops = 2 } = {}) {
+  // 种子匹配 + 两跳扩散的实现在 lib/assoc.mjs（纯函数），这里只负责读图、传 clip。
+  function assocFromGraph(dir, query, opts = {}) {
     const g = loadGraph(dir)
-    if (!g?.nodes || !g?.adj) return []
-    const terms = String(query || '').replace(/\u3000/g, ' ').split(/\s+/).filter(Boolean)
-    if (!terms.length) return []
-    const seeds = []
-    for (const [id, n] of Object.entries(g.nodes)) {
-      const blob = `${n.title || ''}${n.text || ''}`
-      let hit = 0
-      for (const t of terms) if (blob.includes(t)) hit++
-      if (hit) seeds.push({ id, hit, len: (n.text || '').length })
-    }
-    seeds.sort((a, b) => b.hit - a.hit || a.len - b.len)
-    const picked = seeds.slice(0, 3)
-    if (!picked.length) return []
-    const score = new Map()
-    const visited = new Set()
-    for (const s of picked) { score.set(s.id, 1); visited.add(s.id) }
-    let frontier = picked.map((s) => s.id)
-    for (let hop = 1; hop <= hops; hop++) {
-      const cand = new Map()
-      for (const src of frontier) {
-        for (const e of (g.adj[src] || []).slice(0, 12)) {
-          if (visited.has(e.dst)) continue
-          const want = e.w * Math.pow(0.7, hop - 1)
-          if (!(cand.get(e.dst) >= want)) cand.set(e.dst, want)
-        }
+    if (!g) return []
+    return assocGraph(g, query, { ...opts, clip })
+  }
+
+  // 写完日记/主档顺手推荐该挂的双链（规则和 memory-graph/suggest_links.py 一致）。
+  function linkHint(dir, text) {
+    try {
+      const g = loadGraph(dir)
+      if (!g) return {}
+      const cands = suggestLinks(g, text, { top: 5 })
+      if (!cands.length) return {}
+      const keys = cands.map((c) => `[[${c.key}]]`).join(' ')
+      return {
+        suggestLinks: cands,
+        hint: `顺手补下双链（挑合适的，别硬挂）：${keys}；补完在 memory-graph 里跑 build.cmd 重建图谱。`,
       }
-      if (!cand.size) break
-      for (const [k, v] of cand) { score.set(k, Math.max(score.get(k) || 0, v)); visited.add(k) }
-      frontier = [...cand.keys()]
+    } catch (e) {
+      log(`双链推荐失败：${e?.message || e}`)
+      return {}
     }
-    const seedIds = new Set(picked.map((s) => s.id))
-    return [...score.entries()]
-      .filter(([id, s]) => !seedIds.has(id) && s >= min)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, top)
-      .map(([id, s]) => {
-        const n = g.nodes[id] || {}
-        return {
-          score: Math.round(s * 100) / 100,
-          id,
-          kind: n.kind,
-          title: n.title,
-          source: n.source,
-          section: n.section,
-          excerpt: clip(String(n.text || '').replace(/\s+/g, ' '), 80),
-        }
-      })
   }
 
   function handleMem(input) {

@@ -1,6 +1,6 @@
 {
   "name": "dsh-memory-keeper",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Cross-session memory for DSH: export every session to readable Markdown transcripts, keep one long-term MEMORY.md, and get a wake-up summary in a fresh window.",
   "keywords": [
     "dsh",
