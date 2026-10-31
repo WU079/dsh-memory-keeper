@@ -98,6 +98,29 @@ mem_write { "content": "今天把面板写完了。", "target": "diary" }
 无参数。返回当前状态：数据目录及来源、模式（只读 / 可读写）、主档大小与修改时间、日记和会话数量、上次
 导出 / 归档 / 备份时间、以及当前生效的配置。
 
+## 记忆图谱（memory graph）
+
+`lib/assoc.mjs` 是这个插件里「记忆之间能互相找到」的那部分逻辑：种子匹配 → 关键词重合 → 一跳扩散。
+它在两个地方露头：
+
+- `mem_write` 写完一条，返回里会多带一个 `suggestLinks`（以及一句 `hint`），告诉你这条内容适合挂哪几个
+  `[[键]]`——它是从你已有的图谱里推的，不是模板；
+- `mem_search` 返回的 `related` 字段，是「顺边能走到的」其他条目，比单纯命中关键词更远一点。
+
+如果你想把同一套逻辑放在命令行里用（写日记前扫一眼该挂什么、或者查一个词能走到哪儿），
+`tools/memory-graph/` 里有一份 Python 实现：
+
+```bash
+cd <你的记忆目录>/memory-graph
+python build.py                 # 读 MEMORY.md + diary/，建 graph.db / graph.json
+python query.py "某个主题词"     # 扩散激活召回
+python suggest_links.py --file 草稿.md   # 推荐该挂的 [[键]]
+```
+
+用法、目录约定、以及为什么这样设计，见 [`tools/memory-graph/README.md`](tools/memory-graph/README.md)；
+主档和日记的格式模板见 [`examples/MEMORY.example.md`](examples/MEMORY.example.md)。
+`graph.db` / `graph.json` 都是派生物，随时可删可重建，已在 `.gitignore` 里。
+
 ```
 mem_status
 ```

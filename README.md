@@ -111,6 +111,30 @@ file size and mtime, diary and session counts, last export / archive / backup ti
 mem_status
 ```
 
+## Memory graph
+
+`lib/assoc.mjs` is the part of this plugin that lets memories find each other: seed matching → keyword overlap →
+one-hop diffusion. It surfaces in two places:
+
+- after `mem_write`, the result carries a `suggestLinks` list (plus a short `hint`) with the `[[keys]]` that fit the
+  text you just saved — computed from your existing graph, not from a template;
+- `mem_search` returns a `related` field: entries you can reach by following graph edges, i.e. further than plain
+  keyword matches.
+
+The same logic also ships as a small CLI, for when you want to check links before saving or see where a topic leads:
+
+```bash
+cd <your-memory-dir>/memory-graph
+python build.py                 # read MEMORY.md + diary/, write graph.db / graph.json
+python query.py "some topic"    # diffuse-activation recall
+python suggest_links.py --file draft.md   # which [[keys]] to link
+```
+
+Usage, directory conventions and the design rationale are in
+[`tools/memory-graph/README.md`](tools/memory-graph/README.md); the main-file and diary templates are in
+[`examples/MEMORY.example.md`](examples/MEMORY.example.md). `graph.db` / `graph.json` are derived data — delete and
+rebuild them any time; they are already in `.gitignore`.
+
 ## `/mem` command
 
 | command | what it does |

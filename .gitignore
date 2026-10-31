@@ -7,3 +7,11 @@ Thumbs.db
 
 # internal planning doc, not part of the published plugin
 PLAN.md
+
+# memory-graph build artifacts (derived data, rebuild with build.py)
+tools/memory-graph/graph.db
+tools/memory-graph/graph.json
+tools/memory-graph/*.db
+tools/memory-graph/*.json
+__pycache__/
+*.pyc
