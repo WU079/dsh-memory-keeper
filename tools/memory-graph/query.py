@@ -8,23 +8,19 @@
      能落到「记忆.插件」，因为日记里写的是 memory-graph 这种英文名）；
   3) 英文/工具名不分大小写，`-`/`_` 忽略。
 
-用法（Windows 上不想折腾环境的话，直接用同目录的 q.cmd）：
-  python query.py "某个主题词"
-  python query.py "某个主题词" --hops 2 --top 8
+用法（系统 Python 3.11 坏了，用 dsh 运行时那个 3.12，见 build.cmd）：
+  python query.py "抖音 标签"
+  python query.py "记忆图谱" --hops 2 --top 8
   python query.py --stats
 """
 import os
 import sys
-
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
 import sqlite3
 import argparse
 from collections import defaultdict
 
-DB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "graph.db")
+DB = os.environ.get("MEMORY_DB") or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "graph.db")
 DECAY = 0.7          # 每跳衰减
 SEEDS = 5            # 种子数
 MAX_EDGES_PER_NODE = 12
@@ -61,11 +57,11 @@ def find_seeds(con, q):
     terms = [t for t in q.replace("　", " ").split() if t]
     if not terms:
         return []
-    rows = con.execute("SELECT id, kind, title, text FROM nodes").fetchall()
+    rows = con.execute("SELECT id, kind, title, text, COALESCE(weight,1.0) FROM nodes").fetchall()
     deg = dict(con.execute(
         "SELECT src, SUM(weight) FROM edges GROUP BY src").fetchall())
     out = []
-    for nid, kind, title, text in rows:
+    for nid, kind, title, text, w in rows:
         blob = (title + "\n" + (text or "")).lower()
         tlow = (title or "").lower()
         score, fuzzy = 0.0, []
@@ -87,7 +83,8 @@ def find_seeds(con, q):
                     fuzzy.append(tl[:n])
         if score > 0:
             why = "模糊：" + "、".join(sorted(set(fuzzy))) if fuzzy else ""
-            out.append((score, kind, -deg.get(nid, 0.0), len(text or ""),
+            # 遗忘系统：命中的分乘记忆权重（快忘掉的排后面，但不至于搜不到）
+            out.append((score * float(w or 1.0), kind, -deg.get(nid, 0.0), len(text or ""),
                         (nid, kind, title, text, why)))
     # 同分：memory 优先 → 边上权重大的（真联得上别的记忆）→ 正文短的
     out.sort(key=lambda x: (-x[0], 0 if x[1] == "memory" else 1, x[2], x[3]))
@@ -132,18 +129,14 @@ def describe(con, nid):
 
 
 def main():
-    global DB
     ap = argparse.ArgumentParser()
     ap.add_argument("query", nargs="*", help="关键词")
     ap.add_argument("--hops", type=int, default=2)
     ap.add_argument("--top", type=int, default=6)
     ap.add_argument("--min", type=float, default=0.8, help="低于这个分数当噪声丢掉")
-    ap.add_argument("--db", help="graph.db 路径，默认取本脚本旁边那个")
     ap.add_argument("--stats", action="store_true")
     ap.add_argument("--show", type=int, default=0, help="显示前 N 条的正文预览")
     a = ap.parse_args()
-    if a.db:
-        DB = os.path.abspath(a.db)
 
     con = conn()
 
@@ -172,6 +165,19 @@ def main():
 
     score = spread(con, seeds, a.hops)
     seed_ids = {s[0] for s in seeds}
+
+    # 遗忘系统：扩散出来的也按权重打折；命中的记忆顺手加强一点（用进废退）
+    wmap = dict(con.execute("SELECT id, COALESCE(weight,1.0) FROM nodes").fetchall())
+    score = {k: v * float(wmap.get(k, 1.0)) for k, v in score.items()}
+    try:
+        import decay as _decay
+        root = os.environ.get("MEMORY_ROOT") or os.path.dirname(
+            os.path.dirname(os.path.abspath(DB)))
+        for sid in seed_ids:
+            if str(sid).startswith("mem:"):
+                _decay.touch(root, str(sid)[4:])
+    except Exception:
+        pass
 
     print(f"查询：{q}")
     print("\n== 直接命中 ==")

@@ -48,6 +48,33 @@ python suggest_links.py --keys             # 列出所有能挂的键
 
 Windows 的 `.cmd` 会优先用 DSH 运行时自带的 Python，找不到就退回 PATH 上的 `python`。
 
+## 遗忘曲线（decay）
+
+记忆不该只有「有 / 没有」两态，所以每条记忆带一个权重：`1.0` 是全亮，`0.05` 是几乎忘掉。
+**权重只影响「还会不会主动推荐 / 排序靠不靠前」，永远不删记忆**——想找还是搜得到。
+
+每次 `build.cmd` 会先跑一次 `decay.py tick`（幂等，同一天跑几次结果一样）：
+
+| 情况 | 每天乘 |
+| --- | --- |
+| 普通键 | `0.985` |
+| `旧.*`（过时的旧账） | `0.975` |
+| 钉子：`身份.` `QQ.` `语音.` `日记.` `记忆.` `抖音.` `游戏.` `工具.` 前缀，或名字里带「守则/规则/偏好/禁止/必须/安全/底线/锚定」 | 不衰减 |
+
+权重回升：**内容被改写** `+0.35`（你重新记了一遍），**被查询/搜索命中** `+0.08`（想起来一次）。
+下限 `0.05`，上限 `1.0`。
+
+```bash
+python decay.py tick          # 结算到今天（build.cmd 自动做）
+python decay.py status        # 看谁在变淡、谁最牢
+python decay.py touch 抖音.发布  # 手动补一笔（相当于「刚想起它」）
+# Windows：decay.cmd status
+```
+
+状态存在 `memory-graph/decay.json`，键是记忆的键名，值是权重 + 上次结算日 + 内容哈希。
+`build.py` 把权重写进 `graph.db` 的 `nodes.weight` 和 `graph.json`；`query.py` 排序乘权重，
+`suggest_links.py` 与插件侧的 `suggestLinks` 对 `< 0.4` 的键不再推荐。
+
 ## 设计上的几个选择（踩过坑才有）
 
 - **图谱是派生物**：`graph.db` / `graph.json` 随时可以删、可以重建，真相永远在 markdown 里。
@@ -65,8 +92,9 @@ Windows 的 `.cmd` 会优先用 DSH 运行时自带的 Python，找不到就退�
 | 文件 | 作用 |
 | --- | --- |
 | `build.py` | 抽节点（MEMORY.md 的条目 + diary 的段落）、算结构边、写 `graph.db` / `graph.json` |
-| `query.py` | 扩散激活召回：种子匹配 → 顺边扩散 → 按分数排序输出 |
+| `query.py` | 扩散激活召回：种子匹配 → 顺边扩散 → 按分数排序输出（分数乘遗忘权重） |
 | `suggest_links.py` | 给一段文字推荐该挂的 `[[键]]`（可 `--line-only` 直接粘贴） |
+| `decay.py` | 遗忘曲线：按天给每条记忆降权，改写 +0.35、命中 +0.08，下限 0.05 |
 | `test-assoc.mjs` | 拿 `graph.json` 直接调插件里的 `lib/assoc.mjs`，验证两边算法一致 |
 | `*.cmd` | Windows 下免配环境的包装脚本 |
 

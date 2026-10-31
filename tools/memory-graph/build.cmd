@@ -1,8 +1,10 @@
 @echo off
 rem Rebuild the memory graph (graph.db + graph.json).
-rem Prefer the Python bundled with the DSH runtime; fall back to python on PATH.
+rem Also settles the forgetting curve first (decay.py tick), so weights are fresh.
+rem Prefer the Python shipped with the DSH runtime; fall back to whatever python is on PATH.
 setlocal
-set "PY=%DSH_HOME%\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
-if not exist "%PY%" set "PY=%USERPROFILE%\.dsh\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
-if not exist "%PY%" set "PY=python"
+set "PY=python"
+if defined DSH_HOME if exist "%DSH_HOME%\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe" set "PY=%DSH_HOME%\dsh-runtimes\dsh-primary-runtime\dependencies\python\python.exe"
+
+"%PY%" "%~dp0decay.py" tick >nul 2>&1
 "%PY%" "%~dp0build.py" %*

@@ -1,20 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""记忆图谱构建 —— 从 MEMORY.md + diary/ 抽节点和结构边，建一张 SQLite 图。
+"""A personal memory graph —— 从 MEMORY.md + diary 抽节点和结构边，建 SQLite 图。
 
 图谱是派生物：随时可删可重建，真相永远在源文件里。
-
-默认把「本文件的上一级目录」当作记忆根目录（即 MEMORY.md 和 diary/ 所在处），
-也就是把这个文件夹放进你的记忆目录就能直接跑：
-
-    <memory-root>/MEMORY.md      ← 记忆主档，键写成 [主题.子项]
-    <memory-root>/diary/*.md     ← 日记，一段一条
-    <memory-root>/memory-graph/  ← 本脚本所在目录，graph.db / graph.json 落在这里
-
-也可以显式指定：
-    python build.py --root D:/my-memory
-    python build.py --root D:/my-memory --db D:/tmp/graph.db
-    set MEMORY_ROOT=D:/my-memory && python build.py
+用法：python build.py
 """
 import os
 import re
@@ -22,22 +11,18 @@ import sqlite3
 import glob
 import math
 import json
-import argparse
 from datetime import datetime
 from collections import defaultdict
 
-
-def default_root():
-    return os.environ.get("MEMORY_ROOT") or os.path.dirname(
-        os.path.dirname(os.path.abspath(__file__))
-    )
-
-
-ROOT = default_root()
-HERE = os.path.dirname(os.path.abspath(__file__))
-DB = os.path.join(HERE, "graph.db")
+ROOT = os.environ.get("MEMORY_ROOT") or os.getcwd()
+DB = os.environ.get("MEMORY_DB") or os.path.join(ROOT, "memory-graph", "graph.db")
 MEM = os.path.join(ROOT, "MEMORY.md")
 DIARY = os.path.join(ROOT, "diary")
+
+try:  # 遗忘系统：读每条记忆的权重（没有就全按 1.0）
+    import decay as _decay
+except Exception:
+    _decay = None
 
 MAX_ENTS = 40          # 每个节点最多保留的实体数
 MAX_EDGES = 8          # 每个节点最多向外连的边数
@@ -149,6 +134,20 @@ def build():
     os.makedirs(os.path.dirname(DB), exist_ok=True)
     nodes = parse_memory(MEM) + parse_diary(DIARY)
 
+    # 权重：memory 条目踩遗忘曲线（decay.py），日记固定 1.0（它就是时间线本身）
+    wmap = {}
+    if _decay is not None:
+        try:
+            wmap = _decay.weights(ROOT)
+        except Exception:
+            wmap = {}
+    for nd in nodes:
+        if nd["kind"] == "memory":
+            key = nd["title"]
+            nd["weight"] = wmap.get(key, 1.0)
+        else:
+            nd["weight"] = 1.0
+
     # 实体 → 节点
     node_ents = {}
     df = defaultdict(int)
@@ -253,7 +252,7 @@ def build():
     DROP TABLE IF EXISTS nodes;
     DROP TABLE IF EXISTS edges;
     DROP TABLE IF EXISTS entities;
-    CREATE TABLE nodes(id TEXT PRIMARY KEY, kind TEXT, title TEXT, text TEXT, ts TEXT, source TEXT, section TEXT);
+    CREATE TABLE nodes(id TEXT PRIMARY KEY, kind TEXT, title TEXT, text TEXT, ts TEXT, source TEXT, section TEXT, weight REAL DEFAULT 1.0);
     CREATE TABLE edges(src TEXT, dst TEXT, rel TEXT, weight REAL, origin TEXT, PRIMARY KEY(src,dst));
     CREATE TABLE entities(entity TEXT, kind TEXT, node_id TEXT, PRIMARY KEY(entity,node_id));
     CREATE INDEX idx_e_src ON edges(src);
@@ -267,8 +266,9 @@ def build():
     rows.sort(key=lambda r: r[3])   # 升序：弱的先插，强的后插覆盖
     con.executemany("INSERT OR REPLACE INTO edges VALUES (?,?,?,?,?)", rows)
     con.executemany(
-        "INSERT OR REPLACE INTO nodes VALUES (?,?,?,?,?,?,?)",
-        [(n["id"], n["kind"], n["title"], n["text"], n["ts"], n["source"], n["section"]) for n in nodes],
+        "INSERT OR REPLACE INTO nodes VALUES (?,?,?,?,?,?,?,?)",
+        [(n["id"], n["kind"], n["title"], n["text"], n["ts"], n["source"], n["section"],
+          float(n.get("weight", 1.0))) for n in nodes],
     )
     ent_rows = []
     for nid, ents in node_ents.items():
@@ -285,6 +285,10 @@ def build():
         "edges": len(edges),
         "entities": len(df),
         "dangling_links": len(dangling),
+        "weight_avg_memory": round(
+            sum(n["weight"] for n in nodes if n["kind"] == "memory")
+            / max(1, sum(1 for n in nodes if n["kind"] == "memory")), 3),
+        "weight_fading": sum(1 for n in nodes if n["kind"] == "memory" and n["weight"] < 0.4),
         "db": DB,
     }
 
@@ -302,6 +306,7 @@ def build():
                 "title": n["title"],
                 "source": n["source"],
                 "section": n["section"],
+                "weight": round(float(n.get("weight", 1.0)), 4),
                 "text": (n["text"] or "")[:300],
             }
             for n in nodes
@@ -316,22 +321,5 @@ def build():
     return stat
 
 
-def main():
-    global ROOT, MEM, DIARY, DB
-    ap = argparse.ArgumentParser(description="构建记忆图谱（graph.db + graph.json）")
-    ap.add_argument("--root", help="记忆根目录（含 MEMORY.md 与 diary/），默认取 MEMORY_ROOT 或本目录的上一级")
-    ap.add_argument("--db", help="graph.db 输出路径，默认落在本脚本旁边")
-    a = ap.parse_args()
-    if a.root:
-        ROOT = os.path.abspath(a.root)
-        MEM = os.path.join(ROOT, "MEMORY.md")
-        DIARY = os.path.join(ROOT, "diary")
-    if a.db:
-        DB = os.path.abspath(a.db)
-    if not os.path.exists(MEM):
-        ap.error(f"没找到 {MEM}（用 --root 指向放了 MEMORY.md 的目录）")
-    build()
-
-
 if __name__ == "__main__":
-    main()
+    build()

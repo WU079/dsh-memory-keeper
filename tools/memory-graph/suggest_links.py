@@ -1,20 +1,21 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-"""记忆双链推荐 —— 写完一段话，看看该挂哪几个 [[键]]。
+"""Bidirectional-link suggestions for your memory —— 写完一段话，看看该挂哪几个 [[键]]。
 
 为什么要有它：MEMORY.md 的键靠手挂的 [[键]] 互相连起来，图才准；但写日记时
 想不起有哪些键、也想不到该连谁。这个脚本同时做三件事：
-  1) 直接点名：正文里出现键名（如 记忆.统一）或键的末段（如 统一）→ 强命中；
+  1) 直接点名：正文里出现键名（记忆.统一）或键的末段（统一）→ 强命中；
   2) 关键词重合：中文按三字片段（共享 2 字太容易误报，比如「尾巴」「慢慢」）、
      英文按单词，跟每条记忆的正文比重合度；
   3) 一跳扩散：从命中的条目顺着 graph.json 的边找间接相关的（边权 × 0.7），
      只推荐 memory 条目 —— 只有它们能写成 [[键]]（日记 node 没有键名）。
 
-用法（Windows 上可以直接用同目录的 suggest.cmd，它会自己找 python）：
-  python suggest_links.py "今天写的一段话"
-  python suggest_links.py --file 草稿.md
-  python suggest_links.py -            # 从 stdin 读（管道/重定向）
-  python suggest_links.py --keys       # 列所有能挂的键（写东西前扫一眼）
+用法：
+  PY=python
+  "$PY" suggest_links.py "今天写的一段话"
+  "$PY" suggest_links.py --file 草稿.md
+  "$PY" suggest_links.py -            # 从 stdin 读（管道/重定向）
+  "$PY" suggest_links.py --keys       # 列所有能挂的键（写东西前扫一眼）
   选项：--top 8  --min 0.8  --json  --line-only
 """
 import argparse
@@ -23,13 +24,8 @@ import os
 import re
 import sys
 
-try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-except Exception:
-    pass
-
 HERE = os.path.dirname(os.path.abspath(__file__))
-GRAPH = os.path.join(HERE, "graph.json")
+GRAPH = os.environ.get("MEMORY_GRAPH") or os.path.join(HERE, "graph.json")
 
 DECAY = 0.7          # 每跳衰减
 MAX_W = 3.0          # 边权上限（link 边是 3.0）
@@ -172,6 +168,13 @@ def candidates(g, text, top=8, min_score=0.6):
         title = nd.get("title", "") or ""
         if not title or title in already or s < min_score:
             continue
+        # 遗忘系统：快忘掉的记忆排后、也不主动推荐（但它还搜得到）
+        w = float(nd.get("weight", 1.0) or 1.0)
+        if w < 0.4:
+            continue
+        s = s * w
+        if s < min_score:
+            continue
         items.append({
             "key": title, "score": round(s, 2), "why": why, "via": via,
             "id": nid, "section": nd.get("section", ""), "source": nd.get("source", ""),
@@ -181,20 +184,20 @@ def candidates(g, text, top=8, min_score=0.6):
 
 
 def main():
-    global GRAPH
     ap = argparse.ArgumentParser(description="记忆双链推荐")
     ap.add_argument("text", nargs="*", help="要分析的文字；给 - 从 stdin 读")
     ap.add_argument("--file", help="从文件读")
-    ap.add_argument("--graph", help="graph.json 路径，默认取本脚本旁边那个")
     ap.add_argument("--top", type=int, default=8)
     ap.add_argument("--min", type=float, default=0.8)
+    ap.add_argument("--graph", default=None, help="graph.json 路径（默认本目录）")
     ap.add_argument("--json", action="store_true", help="输出 JSON")
     ap.add_argument("--line-only", action="store_true", help="只输出可复制的 [[键]] 行")
     ap.add_argument("--keys", action="store_true", help="只列出所有能挂的键")
     a = ap.parse_args()
-    if a.graph:
-        GRAPH = os.path.abspath(a.graph)
 
+    global GRAPH
+    if a.graph:
+        GRAPH = a.graph
     g = load_graph()
 
     if a.keys:
