@@ -53,12 +53,15 @@ this plugin does not shadow or conflict with the built-in ones.
 ## Install
 
 ```bash
-# from npm (after it is published)
-dsh plugin --profile <your-profile> add dsh-memory-keeper
+# from GitHub (latest main — this package is not on npm yet)
+dsh plugin --profile <your-profile> add github:WU079/dsh-memory-keeper
 
 # from a local checkout
 dsh plugin --profile <your-profile> add link:F:\path\to\dsh-memory-keeper
 ```
+
+> Not on npm yet. `dsh plugin add dsh-memory-keeper` will fail with `404 Not Found` until it is published;
+> use one of the two forms above.
 
 The plugin declares `dsh.bundle`, so the profile just has to list the package in `dsh.profile.bundles`. Restart the
 profile afterwards (or reload it) and the `mem_*` tools appear.

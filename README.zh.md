@@ -48,12 +48,14 @@ DSH 自带 `memory_*` 那套：在 `project` / `user` 两个 scope 下存键值�
 ## 安装
 
 ```bash
-# 发到 npm 之后
-dsh plugin --profile <你的 profile> add dsh-memory-keeper
+# 从 GitHub 装（当前主线；这个包还没发到 npm）
+dsh plugin --profile <你的 profile> add github:WU079/dsh-memory-keeper
 
 # 本地开发
 dsh plugin --profile <你的 profile> add link:F:\path\to\dsh-memory-keeper
 ```
+
+> 还没发 npm：`dsh plugin add dsh-memory-keeper` 会报 `404 Not Found`，发布后才可用；现在请用上面两种写法之一。
 
 插件声明了 `dsh.bundle`，profile 里只要在 `dsh.profile.bundles` 列出这个包名就生效。装完重启 profile（或
 重新加载），`mem_*` 工具就出来了。
